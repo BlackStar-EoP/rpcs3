@@ -46,7 +46,7 @@ void breakpoint_list::ClearBreakpoints()
 	{
 		auto* currentItem = takeItem(0);
 		const u32 loc = currentItem->data(Qt::UserRole).value<u32>();
-		m_ppu_breakpoint_handler->RemoveBreakpoint(loc);
+		m_ppu_breakpoint_handler->RemoveBreakpoint(loc, breakpoint_type::bp_execute);
 		delete currentItem;
 	}
 
@@ -55,7 +55,7 @@ void breakpoint_list::ClearBreakpoints()
 
 void breakpoint_list::RemoveBreakpoint(u32 addr)
 {
-	m_ppu_breakpoint_handler->RemoveBreakpoint(addr);
+	m_ppu_breakpoint_handler->RemoveBreakpoint(addr, breakpoint_type::bp_execute);
 
 	for (int i = 0; i < count(); i++)
 	{
@@ -74,19 +74,38 @@ void breakpoint_list::RemoveBreakpoint(u32 addr)
 	}
 }
 
-bool breakpoint_list::AddBreakpoint(u32 pc)
+bool breakpoint_list::AddBreakpoint(u32 pc, bs_t<breakpoint_type> type)
 {
-	if (!m_ppu_breakpoint_handler->AddBreakpoint(pc))
+	if (!m_ppu_breakpoint_handler->AddBreakpoint(pc, type))
 	{
 		return false;
 	}
 
-	m_disasm->disasm(pc);
+	QString breakpointItemText;
+	if (type == breakpoint_type::bp_execute)
+	{
+		// TODO re-enable
+		//const auto cpu = this->cpu.lock();
+		//const auto cpu_offset = cpu->id_type() != 1 ? static_cast<spu_thread&>(*cpu).ls : vm::g_sudo_addr;
+		//m_disasm->offset = cpu_offset;
+
+		m_disasm->disasm(m_disasm->dump_pc = pc);
+
+		breakpointItemText = qstr(m_disasm->last_opcode);
+
+		breakpointItemText.remove(10, 13);
+	}
 
 	QString text = qstr(m_disasm->last_opcode);
-	text.remove(10, 13);
 
-	QListWidgetItem* breakpoint_item = new QListWidgetItem(text);
+		if (type == breakpoint_type::bp_mread)
+		breakpointItemText = QString("BPMR:  0x%1").arg(pc, 8, 16, QChar('0'));
+	if (type == breakpoint_type::bp_mwrite)
+		breakpointItemText = QString("BPMW:  0x%1").arg(pc, 8, 16, QChar('0'));
+	if (type == (breakpoint_type::bp_mread + breakpoint_type::bp_mwrite))
+		breakpointItemText = QString("BPMRW: 0x%1").arg(pc, 8, 16, QChar('0'));
+
+	QListWidgetItem* breakpoint_item = new QListWidgetItem(breakpointItemText);
 	breakpoint_item->setForeground(m_text_color_bp);
 	breakpoint_item->setBackground(m_color_bp);
 	breakpoint_item->setData(Qt::UserRole, pc);
@@ -165,13 +184,13 @@ void breakpoint_list::HandleBreakpointRequest(u32 loc)
 		return;
 	}
 
-	if (m_ppu_breakpoint_handler->HasBreakpoint(loc))
+	if (m_ppu_breakpoint_handler->HasBreakpoint(loc, breakpoint_type::bp_execute))
 	{
 		RemoveBreakpoint(loc);
 	}
 	else
 	{
-		if (!AddBreakpoint(loc))
+		if (!AddBreakpoint(loc, breakpoint_type::bp_execute))
 		{
 			QMessageBox::warning(this, tr("Unknown error while setting breakpoint!"), tr("Failed to set breakpoints."));
 			return;
@@ -187,24 +206,33 @@ void breakpoint_list::OnBreakpointListDoubleClicked()
 
 void breakpoint_list::OnBreakpointListRightClicked(const QPoint &pos)
 {
-	if (!itemAt(pos))
-	{
-		return;
-	}
-
 	m_context_menu = new QMenu();
 
 	if (selectedItems().count() == 1)
 	{
 		QAction* rename_action = m_context_menu->addAction(tr("&Rename"));
-		connect(rename_action, &QAction::triggered, this, [this]()
-		{
-			QListWidgetItem* current_item = selectedItems().first();
-			current_item->setFlags(current_item->flags() | Qt::ItemIsEditable);
-			editItem(current_item);
-		});
+		connect(
+			rename_action, &QAction::triggered, this, [this]()
+			{
+                       QListWidgetItem* current_item = selectedItems().first();
+                       current_item->setFlags(current_item->flags() | Qt::ItemIsEditable);
+                       editItem(current_item);
+        });
+
+		QAction* m_breakpoint_list_delete = new QAction(tr("Delete"), this);
+		m_breakpoint_list_delete->setShortcut(Qt::Key_Delete);
+		m_breakpoint_list_delete->setShortcutContext(Qt::WidgetShortcut);
+		addAction(m_breakpoint_list_delete);
+		connect(m_breakpoint_list_delete, &QAction::triggered, this, &breakpoint_list::OnBreakpointListDelete);
+
+		m_context_menu->addAction(m_breakpoint_list_delete);
 		m_context_menu->addSeparator();
 	}
+
+	QAction* m_addbp = new QAction(tr("Add Breakpoint"), this);
+	addAction(m_addbp);
+	connect(m_addbp, &QAction::triggered, this, &breakpoint_list::ShowAddBreakpointWindow);
+	m_context_menu->addAction(m_addbp);
 
 	m_context_menu->addAction(m_delete_action);
 	m_context_menu->exec(viewport()->mapToGlobal(pos));
@@ -223,4 +251,89 @@ void breakpoint_list::OnBreakpointListDelete()
 	{
 		m_context_menu->close();
 	}
+}
+
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QPushButton>
+
+void breakpoint_list::ShowAddBreakpointWindow()
+{
+	QDialog* diag = new QDialog(this);
+
+	diag->setWindowTitle(tr("Add a breakpoint"));
+	diag->setModal(true);
+
+	QVBoxLayout* vbox_panel = new QVBoxLayout();
+
+	QHBoxLayout* hbox_top = new QHBoxLayout();
+	QLabel* l_address = new QLabel(tr("Address"));
+	QLineEdit* t_address = new QLineEdit();
+	t_address->setPlaceholderText("Address here");
+	t_address->setFocus();
+
+	hbox_top->addWidget(l_address);
+	hbox_top->addWidget(t_address);
+	vbox_panel->addLayout(hbox_top);
+
+	QHBoxLayout* hbox_bot = new QHBoxLayout();
+	QComboBox* co_bptype = new QComboBox(this);
+	QStringList breakpoint_types;
+	breakpoint_types << "Memory Read"
+					 << "Memory Write"
+					 << "Memory Read&Write"
+					 << "Execution";
+	co_bptype->addItems(breakpoint_types);
+
+	hbox_bot->addWidget(co_bptype);
+	vbox_panel->addLayout(hbox_bot);
+
+	QHBoxLayout* hbox_buttons = new QHBoxLayout();
+	QPushButton* b_cancel = new QPushButton(tr("Cancel"));
+	QPushButton* b_addbp = new QPushButton(tr("Add"));
+
+	hbox_buttons->addWidget(b_cancel);
+	hbox_buttons->addWidget(b_addbp);
+	vbox_panel->addLayout(hbox_buttons);
+
+	diag->setLayout(vbox_panel);
+
+	connect(b_cancel, &QAbstractButton::clicked, diag, &QDialog::reject);
+	connect(b_addbp, &QAbstractButton::clicked, diag, &QDialog::accept);
+
+	diag->move(QCursor::pos());
+
+	if (diag->exec() == QDialog::Accepted)
+	{
+		if (!t_address->text().isEmpty())
+		{
+			u32 address = std::stoul(t_address->text().toStdString(), nullptr, 16);
+			bs_t<breakpoint_type> bp_t;
+			switch (co_bptype->currentIndex())
+			{
+			case 0:
+				bp_t = breakpoint_type::bp_mread;
+				break;
+			case 1:
+				bp_t = breakpoint_type::bp_mwrite;
+				break;
+			case 2:
+				bp_t = breakpoint_type::bp_mread + breakpoint_type::bp_mwrite;
+				break;
+			case 3:
+				bp_t = breakpoint_type::bp_execute;
+				break;
+			default:
+				bp_t = {};
+				break;
+			}
+
+			if (bp_t)
+				AddBreakpoint(address, bp_t);
+		}
+	}
+
+	diag->deleteLater();
 }

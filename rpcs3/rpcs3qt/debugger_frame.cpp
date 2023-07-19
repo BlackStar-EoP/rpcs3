@@ -64,6 +64,8 @@ extern std::shared_ptr<CPUDisAsm> make_disasm(const cpu_thread* cpu)
 	}
 }
 
+breakpoint_handler* g_breakpoint_handler;
+
 debugger_frame::debugger_frame(std::shared_ptr<gui_settings> gui_settings, QWidget *parent)
 	: custom_dock_widget(tr("Debugger"), parent)
 	, m_gui_settings(std::move(gui_settings))
@@ -84,6 +86,7 @@ debugger_frame::debugger_frame(std::shared_ptr<gui_settings> gui_settings, QWidg
 	hbox_b_main->setContentsMargins(0, 0, 0, 0);
 
 	m_ppu_breakpoint_handler = new breakpoint_handler();
+	g_breakpoint_handler = m_ppu_breakpoint_handler;
 	m_breakpoint_list = new breakpoint_list(this, m_ppu_breakpoint_handler);
 
 	m_debugger_list = new debugger_list(this, m_gui_settings, m_ppu_breakpoint_handler);
@@ -1125,7 +1128,7 @@ void debugger_frame::DoUpdate()
 	// Check if we need to disable a step over bp
 	if (const auto cpu0 = get_cpu(); cpu0 && m_last_step_over_breakpoint != umax && cpu0->get_pc() == m_last_step_over_breakpoint)
 	{
-		m_ppu_breakpoint_handler->RemoveBreakpoint(m_last_step_over_breakpoint);
+		m_ppu_breakpoint_handler->RemoveBreakpoint(m_last_step_over_breakpoint, breakpoint_type::bp_execute);
 		m_last_step_over_breakpoint = -1;
 	}
 
@@ -1340,13 +1343,13 @@ void debugger_frame::DoStep(bool step_over)
 
 				// Set breakpoint on next instruction
 				const u32 next_instruction_pc = current_instruction_pc + 4;
-				m_ppu_breakpoint_handler->AddBreakpoint(next_instruction_pc);
+				m_ppu_breakpoint_handler->AddBreakpoint(next_instruction_pc, breakpoint_type::bp_execute);
 
 				// Undefine previous step over breakpoint if it hasn't been already
 				// This can happen when the user steps over a branch that doesn't return to itself
 				if (m_last_step_over_breakpoint != umax)
 				{
-					m_ppu_breakpoint_handler->RemoveBreakpoint(next_instruction_pc);
+					m_ppu_breakpoint_handler->RemoveBreakpoint(next_instruction_pc, breakpoint_type::bp_execute);
 				}
 
 				m_last_step_over_breakpoint = next_instruction_pc;

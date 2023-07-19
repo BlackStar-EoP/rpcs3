@@ -1,7 +1,8 @@
 #pragma once
 
 #include "util/types.hpp"
-
+#include "utilities/bit_set.h"
+#include "breakpoint_handler.h"
 #include <QListWidget>
 
 class CPUDisAsm;
@@ -16,8 +17,9 @@ public:
 	breakpoint_list(QWidget* parent, breakpoint_handler* handler);
 	void UpdateCPUData(cpu_thread* cpu, CPUDisAsm* disasm);
 	void ClearBreakpoints();
-	bool AddBreakpoint(u32 pc);
+	bool AddBreakpoint(u32 pc, bs_t<breakpoint_type> type);
 	void RemoveBreakpoint(u32 addr);
+	void ShowAddBreakpointWindow();
 
 	QColor m_text_color_bp;
 	QColor m_color_bp;

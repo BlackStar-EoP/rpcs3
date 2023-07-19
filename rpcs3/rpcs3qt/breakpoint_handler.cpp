@@ -2,29 +2,45 @@
 
 extern bool ppu_breakpoint(u32 loc, bool is_adding);
 
-bool breakpoint_handler::HasBreakpoint(u32 loc) const
+breakpoint_handler::breakpoint_handler()
 {
-	return m_breakpoints.contains(loc);
+	break_on_bpm = false;
 }
 
-bool breakpoint_handler::AddBreakpoint(u32 loc)
+bool breakpoint_handler::IsBreakOnBPM()
 {
-	if (!ppu_breakpoint(loc, true))
-	{
-		return false;
-	}
+	return break_on_bpm;
+}
 
-	ensure(m_breakpoints.insert(loc).second);
+bool breakpoint_handler::HasBreakpoint(u32 loc, bs_t<breakpoint_type> type)
+{
+	return (m_breakpoints_list.find(loc) != m_breakpoints_list.end()) && ((m_breakpoints_list[loc] & type) == type);
+}
+
+bool breakpoint_handler::AddBreakpoint(u32 loc, bs_t<breakpoint_type> type)
+{
+	m_breakpoints_list[loc] = type;
+
+	if (type & breakpoint_type::bp_execute)
+	{
+		ppu_breakpoint(loc, true);
+	}
 	return true;
 }
 
-bool breakpoint_handler::RemoveBreakpoint(u32 loc)
+bool breakpoint_handler::RemoveBreakpoint(u32 loc, bs_t<breakpoint_type> type)
 {
-	if (m_breakpoints.erase(loc) == 0)
+	if ((m_breakpoints_list.find(loc) == m_breakpoints_list.end())) // || ((m_breakpoints_list[loc] & type) != type))
 	{
 		return false;
 	}
 
-	ensure(ppu_breakpoint(loc, false));
+	m_breakpoints_list.erase(loc);
+
+	if (type & breakpoint_type::bp_execute)
+	{
+		ppu_breakpoint(loc, false);
+	}
+
 	return true;
 }
