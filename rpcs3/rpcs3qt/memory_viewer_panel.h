@@ -118,6 +118,7 @@ private:
 	void SetPC(const uint pc);
 
 	void ShowMemory();
+	void ShowDumpMemoryWindow();
 
 	void ShowImage(QWidget* parent, u32 addr, color_format format, u32 width, u32 height, bool flipv) const;
 	u64 OnSearch(std::string wstr, u32 mode);

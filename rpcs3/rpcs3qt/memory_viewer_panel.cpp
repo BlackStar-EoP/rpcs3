@@ -202,8 +202,10 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDis
 	QGroupBox* tools_buttons = new QGroupBox(tr("Tools"), this);
 	QVBoxLayout* hbox_tools_buttons = new QVBoxLayout(this);
 	QPushButton* b_img = new QPushButton(tr("View\nimage"), this);
+	QPushButton* dumpmem = new QPushButton(tr("DMP"), this);
 	b_img->setAutoDefault(false);
 	hbox_tools_buttons->addWidget(b_img);
+	hbox_tools_buttons->addWidget(dumpmem);
 	tools_buttons->setLayout(hbox_tools_buttons);
 
 	// Merge Tools = Memory Viewer Options + Raw Image Preview Options + Tool Buttons
@@ -442,6 +444,12 @@ memory_viewer_panel::memory_viewer_panel(QWidget* parent, std::shared_ptr<CPUDis
 		const int sizey = sb_img_size_y->value();
 		ShowImage(this, m_addr, format, sizex, sizey, false);
 	});
+
+	connect(dumpmem, &QAbstractButton::clicked, [=, this]()
+	{
+		ShowDumpMemoryWindow();
+	});
+
 
 	QTimer* auto_refresh_timer = new QTimer(this);
 
@@ -889,6 +897,81 @@ void memory_viewer_panel::ShowMemory()
 
 	textSize = m_fontMetrics->size(0, m_mem_ascii->text());
 	m_mem_ascii->setFixedSize(textSize.width() + 10, mask_height(textSize.height()));
+}
+
+void memory_viewer_panel::ShowDumpMemoryWindow()
+{
+	QDialog* diag = new QDialog(this);
+
+	diag->setWindowTitle(tr("Dump memory"));
+	diag->setModal(true);
+
+	QVBoxLayout* vbox_panel = new QVBoxLayout();
+
+	QHBoxLayout* hbox_top = new QHBoxLayout();
+	QLabel* l_address = new QLabel(tr("Address"));
+	QLineEdit* t_address = new QLineEdit();
+	t_address->setPlaceholderText("Address here");
+	t_address->setFocus();
+
+	hbox_top->addWidget(l_address);
+	hbox_top->addWidget(t_address);
+	vbox_panel->addLayout(hbox_top);
+
+	QHBoxLayout* hbox_bot = new QHBoxLayout();
+	QLabel* l_length = new QLabel(tr("Length"));
+	QLineEdit* t_length = new QLineEdit();
+	t_length->setText("268435456");
+
+	hbox_bot->addWidget(l_length);
+	hbox_bot->addWidget(t_length);
+	vbox_panel->addLayout(hbox_bot);
+
+	QHBoxLayout* hbox_buttons = new QHBoxLayout();
+	QPushButton* b_cancel = new QPushButton(tr("Cancel"));
+	QPushButton* b_addbp = new QPushButton(tr("Dump"));
+
+	hbox_buttons->addWidget(b_cancel);
+	hbox_buttons->addWidget(b_addbp);
+	vbox_panel->addLayout(hbox_buttons);
+
+	diag->setLayout(vbox_panel);
+
+	connect(b_cancel, &QAbstractButton::clicked, diag, &QDialog::reject);
+	connect(b_addbp, &QAbstractButton::clicked, diag, &QDialog::accept);
+
+	diag->move(QCursor::pos());
+
+	if (diag->exec() == QDialog::Accepted)
+	{
+		if (!t_address->text().isEmpty() && !t_length->text().isEmpty())
+		{
+			QString text = t_address->text();
+			bool ok = false;
+			u32 addr = (text.startsWith("0x", Qt::CaseInsensitive) ? text.right(text.size() - 2) : text).toULong(&ok, 16);
+			uint32_t length = t_length->text().toInt();
+			uint32_t endaddr = addr + length;
+			QString filename = text + ".dmp";
+			FILE* fp = fopen(filename.toLocal8Bit().data(), "wb+");
+			while (addr < (endaddr))
+			{
+				if (const auto ptr = this->to_ptr(addr))
+				{
+					const be_t<u32> rmem = read_from_ptr<be_t<u32>>(static_cast<const u8*>(ptr));
+					fwrite(&rmem, sizeof(u32), 1, fp);
+				}
+				else
+				{
+					fprintf(fp, "????");
+				}
+
+				addr += 4;
+			}
+			fclose(fp);
+		}
+	}
+
+	diag->deleteLater();
 }
 
 void memory_viewer_panel::SetPC(const uint pc)
